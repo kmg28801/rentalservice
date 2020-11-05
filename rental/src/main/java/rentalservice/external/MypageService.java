@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.RequestMethod;
 
 import java.util.Date;
 
-@FeignClient(name="mypage", url="http://localhost:8084")
+@FeignClient(name="mypage", url="${api.mypage.url}")
 public interface MypageService {
 
     @RequestMapping(method= RequestMethod.POST, path="/mypages")

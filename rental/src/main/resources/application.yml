@@ -37,6 +37,15 @@ logging:
     org.springframework.cloud: debug
 server:
   port: 8081
+
+
+api:
+  pay:
+    url: http://localhost:8082
+  mypage:
+    url: http://localhost:8084
+  reclamation:
+    url: http://localhost:8083
 ---
 
 spring:
