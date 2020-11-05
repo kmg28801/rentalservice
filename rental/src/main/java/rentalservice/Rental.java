@@ -34,13 +34,17 @@ public class Rental {
         reclamationing.publishAfterCommit();
 
         rentalservice.external.Mypage mypage = new rentalservice.external.Mypage();
-        mypage.setId(reclamationing.getId());
+        mypage.setOrderId(reclamationing.getId());
+        mypage.setStatus(reclamationing.getStatus());
+        mypage.setProductId(reclamationing.getProductId());
+        mypage.setQty(reclamationing.getQty());
         RentalApplication.applicationContext.getBean(rentalservice.external.MypageService.class)
                 .deletemypage(mypage);
 
         rentalservice.external.Reclamation reclamation = new rentalservice.external.Reclamation();
         reclamation.setStatus("Reclaiming");
         reclamation.setOrderId(reclamationing.getId());
+
         RentalApplication.applicationContext.getBean(rentalservice.external.ReclamationService.class)
             .reclamationed(reclamation);
 
