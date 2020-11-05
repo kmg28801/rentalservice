@@ -62,3 +62,11 @@ spring:
         event-out:
           destination: rentalservice
           contentType: application/json
+
+api:
+  pay:
+    url: ${configurl}
+  mypage:
+    url: http://mypage:8080
+  reclamation:
+    url: http://reclamation:8080
