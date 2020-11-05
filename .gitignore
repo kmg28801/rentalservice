@@ -1,0 +1,6 @@
+# Project exclude paths
+/gateway/target/
+/mypage/target/
+/pay/target/
+/reclamation/target/
+/rental/target/

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/gateway/boot-camp-gateway.iml" filepath="$PROJECT_DIR$/gateway/boot-camp-gateway.iml" />
+      <module fileurl="file://$PROJECT_DIR$/mypage/mypage.iml" filepath="$PROJECT_DIR$/mypage/mypage.iml" />
+      <module fileurl="file://$PROJECT_DIR$/pay/pay.iml" filepath="$PROJECT_DIR$/pay/pay.iml" />
+      <module fileurl="file://$PROJECT_DIR$/reclamation/reclamation.iml" filepath="$PROJECT_DIR$/reclamation/reclamation.iml" />
+      <module fileurl="file://$PROJECT_DIR$/rental/rental.iml" filepath="$PROJECT_DIR$/rental/rental.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/rentalservice.iml" filepath="$PROJECT_DIR$/.idea/rentalservice.iml" />
+    </modules>
+  </component>
+</project>
