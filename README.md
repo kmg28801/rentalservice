@@ -855,7 +855,7 @@ public interface PayService {
 
 
 ## Livness구현
-- Order의 depolyment.yaml 소스설정
+- Rental의 depolyment.yaml 소스설정
 - http get방식에서 tcp방식 포트 40001로 변경하여 pod describe
 
 
