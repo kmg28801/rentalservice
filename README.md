@@ -112,7 +112,7 @@
 
 
 ## Event Storming 결과
-* MSAEz 로 모델링한 이벤트스토밍 결과:  http://www.msaez.io/#/storming/mE5NnEwVhiZ6GAhrFPdKZIyqntJ2/share/13bc76042c47f7313aa268132937eb53/-MLCDCJbeFj1l2L04eU9
+* MSAEz 로 모델링한 이벤트스토밍 결과:  http://www.msaez.io/#/storming/mE5NnEwVhiZ6GAhrFPdKZIyqntJ2/local/d1c70368956952658ad59f5d08751f08/init
 
 
 ### 이벤트 도출
@@ -127,27 +127,28 @@
 
 ### 기능적/비기능적 요구사항을 커버하는지 검증
 
-![image](https://user-images.githubusercontent.com/65432084/98189196-cb65e300-1f57-11eb-9d3a-f6e63cdd6539.PNG)
+![image](https://user-images.githubusercontent.com/53685313/98325403-0f2d1b00-2032-11eb-810e-d81cd2881ac8.png)
 
-    - 고객이  주문한다 (ok)
-    - 주문을 하면 결제 기능이 호출된다 (ok)
-    - 고객이 주문 취소할 수 있다 (ok)
-    - 주문이 취소되면 결재가 취소된다 (ok)
-    - 결재가 취소되면 배송이 취소된다 (ok)
+
+    - 고객이  대여한다 (ok)
+    - 대여를 하면 결제 기능이 호출된다 (ok)
+    - 고객이 반납한다 (ok)
+    - 반납을 하게되면 도서가 반납된다 (ok)
     - 고객이 주문상태를 확인한다 (ok)
     
 ### 비기능 요구사항에 대한 검증
 
-![image](https://user-images.githubusercontent.com/65432084/98189295-0405bc80-1f58-11eb-8501-5a3623d315a7.PNG)
+![image](https://user-images.githubusercontent.com/53685313/98325551-6a5f0d80-2032-11eb-8351-96c87f26efc3.png)
 
-      1 결제가 되지 않은 주문건은 아예 거래가 성립되지 않아야 한다  Sync 호출 (ok)
-      2 주문은 365일 24시간 받을 수 있어야 한다  Async (event-driven), Eventual Consistency (ok)
+
+      1 결제가 되지 않은 대여건은 대여가 성립되지 않아야 한다  Sync 호출 (ok)
+      2 반납이 완료 처리된 건에 대해서만 대여건이 삭제된다. Sync 호출 (ok)
 
 ## 헥사고날 아키텍처 다이어그램 도출
     
-![image](https://user-images.githubusercontent.com/65432084/98189668-c81f2700-1f58-11eb-8ad7-988e600db80c.PNG)
+![image](https://user-images.githubusercontent.com/53685313/98326368-6c29d080-2034-11eb-8c76-af6802e16594.png)
 
-
+    - PolyGlot 패턴을 적용해 H2, HSQL 2개 DB 사용
     - Chris Richardson, MSA Patterns 참고하여 Inbound adaptor와 Outbound adaptor를 구분함
     - 호출관계에서 PubSub 과 Req/Resp 를 구분함
     - 서브 도메인과 바운디드 컨텍스트의 분리:  각 팀의 KPI 별로 아래와 같이 관심 구현 스토리를 나눠가짐
@@ -161,35 +162,33 @@
 cd gateway
 mvn spring-boot:run
 
-cd order
+cd rental
 mvn spring-boot:run 
 
 cd pay
 mvn spring-boot:run  
 
-cd delivery
-mvn spring-boot:run  
-
-cd cancel
-mvn spring-boot:run  
-
 cd mypage
 mvn spring-boot:run  
+
+cd reclamation
+mvn spring-boot:run  
+
 
 ## DDD 의 적용
 
 - 각 서비스내에 도출된 핵심 Aggregate Root 객체를 Entity 로 선언하였다: (예시는 order 마이크로 서비스). 이때 가능한 현업에서 사용하는 언어 (유비쿼터스 랭귀지)를 그대로 사용하려고 노력하였고 영문으로 사용하여 별다른 오류 없이 구현하였다.
 
 ```
-package yes;
+package rentalservice;
 
 import javax.persistence.*;
 import org.springframework.beans.BeanUtils;
 import java.util.List;
 
 @Entity
-@Table(name="Order_table")
-public class Order {
+@Table(name="Rental_table")
+public class Rental {
 
     @Id
     @GeneratedValue(strategy=GenerationType.AUTO)
@@ -197,6 +196,46 @@ public class Order {
     private String productId;
     private Integer qty;
     private String status;
+
+    @PostPersist
+    public void onPostPersist() {
+
+        Renting renting = new Renting();
+        BeanUtils.copyProperties(this, renting);
+        renting.publishAfterCommit();
+        rentalservice.external.Pay pay = new rentalservice.external.Pay();
+        pay.setOrderId(renting.getId());
+        pay.setStatus("Payed");
+        RentalApplication.applicationContext.getBean(rentalservice.external.PayService.class)
+                .payment(pay);
+    }
+    @PreRemove
+    public void onPreRemove() {
+        Reclamationing reclamationing = new Reclamationing();
+        BeanUtils.copyProperties(this, reclamationing);
+        reclamationing.publishAfterCommit();
+
+        rentalservice.external.Mypage mypage = new rentalservice.external.Mypage();
+        mypage.setOrderId(reclamationing.getId());
+        mypage.setStatus(reclamationing.getStatus());
+        mypage.setProductId(reclamationing.getProductId());
+        mypage.setQty(reclamationing.getQty());
+        RentalApplication.applicationContext.getBean(rentalservice.external.MypageService.class)
+                .deletemypage(mypage);
+
+        rentalservice.external.Reclamation reclamation = new rentalservice.external.Reclamation();
+        reclamation.setStatus("Reclaiming");
+        reclamation.setOrderId(reclamationing.getId());
+
+        RentalApplication.applicationContext.getBean(rentalservice.external.ReclamationService.class)
+            .reclamationed(reclamation);
+
+
+
+
+
+    }
+
 
     public Long getId() {
         return id;
@@ -229,14 +268,17 @@ public class Order {
 
 
 
+
+}
+
 ```
 - Entity Pattern 과 Repository Pattern 을 적용하여 JPA 를 통하여 다양한 데이터소스 유형 (RDB or NoSQL) 에 대한 별도의 처리가 없도록 데이터 접근 어댑터를 자동 생성하기 위하여 Spring Data REST 의 RestRepository 를 적용하였다
 ```
-package yes;
+package rentalservice;
 
 import org.springframework.data.repository.PagingAndSortingRepository;
 
-public interface OrderRepository extends PagingAndSortingRepository<Order, Long> {
+public interface RentalRepository extends PagingAndSortingRepository<Rental, Long>{
 
 
 }
@@ -244,22 +286,24 @@ public interface OrderRepository extends PagingAndSortingRepository<Order, Long>
 ```
 - 적용 후 REST API 의 테스트
 ```
-# order 서비스의 주문처리
-http POST 20.196.145.203:8080/orders productId=2 qty=2
+# rental 서비스의 주문처리
+http POST http://20.196.129.196:8080/rentals productId=taejoong qty=10
 
-![image](https://user-images.githubusercontent.com/70181652/98194325-75e30380-1f62-11eb-90ca-ce67cff5d5cf.png)
-
-
-# order 서비스의 주문취소 처리
-http DELETE http://localhost:8081/orders/2
-
-![image](https://user-images.githubusercontent.com/70181652/98194400-aa56bf80-1f62-11eb-9684-cd74269029c7.png)
+![image](https://user-images.githubusercontent.com/53685313/98326489-bf9c1e80-2034-11eb-807c-838526836877.png)
 
 
-# 주문 상태 확인
-http GET http://localhost:8081/orders/1
 
-![image](https://user-images.githubusercontent.com/70181652/98194416-b6428180-1f62-11eb-9a62-98a3b7d3b0f6.png)
+# rental 서비스의 주문취소 처리
+http DELETE http://20.196.129.196:8080/rentals/2
+
+![image](https://user-images.githubusercontent.com/53685313/98326548-de9ab080-2034-11eb-972b-13f2b1fe5227.png)
+
+
+
+# 대여 상태 확인
+http GET http://20.196.129.196:8080/rentals/1
+
+![image](https://user-images.githubusercontent.com/53685313/98326604-f3774400-2034-11eb-8f45-612aa532a8ed.png)
 ```
 
 ## 동기식 호출 과 Fallback 처리
@@ -271,7 +315,8 @@ http GET http://localhost:8081/orders/1
 ```
 # (order) PayService.java
 
-package yes.external;
+
+package rentalservice.external;
 
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -286,63 +331,29 @@ public interface PayService {
     @RequestMapping(method= RequestMethod.POST, path="/pays")
     public void payment(@RequestBody Pay pay);
 
-
-    @RequestMapping(method= RequestMethod.POST, path="/pays")
-    public void paymentcancel(@RequestBody Pay pay);
-    
 }
 ```
 
-- 주문을 받은 직후(@PostPersist) 결제를 요청하도록 처리
+- 대여가 들어온 직후(@PostPersist) 결제를 요청하도록 처리
 ```
 
-# Order.java (Entity)
+# Rental.java (Entity)
 
-    @PostPersist
-    public void onPostPersist(){
-        Ordered ordered = new Ordered();
-        BeanUtils.copyProperties(this, ordered);
-        ordered.publishAfterCommit();
+     @PostPersist
+    public void onPostPersist() {
 
-        //Following code causes dependency to external APIs
-       // it is NOT A GOOD PRACTICE. instead, Event-Policy mapping is recommended.
-
-        yes.external.Pay pay = new yes.external.Pay();
-        pay.setOrderId(ordered.getId());
-        Long lChargeAmount = Long.valueOf(12000);
-        pay.setChargeAmount(lChargeAmount);
+        Renting renting = new Renting();
+        BeanUtils.copyProperties(this, renting);
+        renting.publishAfterCommit();
+        rentalservice.external.Pay pay = new rentalservice.external.Pay();
+        pay.setOrderId(renting.getId());
         pay.setStatus("Payed");
-
-        // mappings goes here
-        OrderApplication.applicationContext.getBean(yes.external.PayService.class)
-            .payment(pay);
-
-
+        RentalApplication.applicationContext.getBean(rentalservice.external.PayService.class)
+                .payment(pay);
     }
     ```
 
 - 동기식 호출에서는 호출 시간에 따른 타임 커플링이 발생하며, 결제 시스템이 장애가 나면 주문도 못받는다는 것을 확인:
-
-
-```
-# 결제 (pay) 서비스를 잠시 내려놓음 (ctrl+c)
-
-#주문처리
-http localhost:8082/orders productId="Harry Portter" qty=1   #Fail
-
-![image](https://user-images.githubusercontent.com/68535067/97143766-a4185480-17a6-11eb-9bb1-e2eff4e2cb04.png)
-
-#결제서비스 재기동
-cd pay
-mvn spring-boot:run
-
-#주문처리
-http localhost:8082/orders productId="Harry Portter" qty=1   #Success
-
-![image](https://user-images.githubusercontent.com/68535067/97144102-36205d00-17a7-11eb-9b4b-8956467228d7.png)
-```
-
-- 또한 과도한 요청시에 서비스 장애가 도미노 처럼 벌어질 수 있다. (서킷브레이커, 폴백 처리는 운영단계에서 설명한다.)
 
 
 
@@ -350,12 +361,12 @@ http localhost:8082/orders productId="Harry Portter" qty=1   #Success
 ## 비동기식 호출 / 시간적 디커플링 / 장애격리 / 최종 (Eventual) 일관성 테스트
 
 
-결제가 이루어진 후에 상점시스템으로 이를 알려주는 행위는 동기식이 아니라 비 동기식으로 처리하여 상점 시스템의 처리를 위하여 결제주문이 블로킹 되지 않아도록 처리한다.
+결제가 이루어진 후에 렌탈서비스에서는 자신의 status를 확인할 수 있는 행위는 동기식이 아니라 비 동기식으로 처리하였다.
  
 - 이를 위하여 결제이력에 기록을 남긴 후에 곧바로 결제승인이 되었다는 도메인 이벤트를 카프카로 송출한다(Publish)
  
 ```
-package yes;
+package rentalservice;
 
 import javax.persistence.*;
 import org.springframework.beans.BeanUtils;
@@ -369,28 +380,61 @@ public class Pay {
     @GeneratedValue(strategy=GenerationType.AUTO)
     private Long id;
     private Long orderId;
-    private Long chargeAmount;
+    private Integer chargeAmount;
     private String status;
 
     @PostPersist
-    public void onPostPersist() {
-   	 if(this.getStatus().equals("Payed")){
-	    PayConfirmed payConfirmed = new PayConfirmed();
-	    BeanUtils.copyProperties(this, payConfirmed);
- 	    payConfirmed.publishAfterCommit();
-	 }else if(this.getStatus().equals("Pay Canceled")){
-        PayCancelled payCancelled = new PayCancelled();
-        BeanUtils.copyProperties(this, payCancelled);
-        payCancelled.publishAfterCommit();
-	 }
+    public void onPostPersist(){
+        PayConfirmed payConfirmed = new PayConfirmed();
+        BeanUtils.copyProperties(this, payConfirmed);
+        payConfirmed.publishAfterCommit();
+
+
+    }
+
+
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }
+    public Long getOrderId() {
+        return orderId;
+    }
+
+    public void setOrderId(Long orderId) {
+        this.orderId = orderId;
+    }
+    public Integer getChargeAmount() {
+        return chargeAmount;
+    }
+
+    public void setChargeAmount(Integer chargeAmount) {
+        this.chargeAmount = chargeAmount;
+    }
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
+    }
+
+
+
+
+}
+
 
 ```
-- 상점 서비스에서는 결제승인 이벤트에 대해서 이를 수신하여 자신의 정책을 처리하도록 PolicyHandler 를 구현한다:
+- 렌탈 서비스에서는 결제승인 및 반납 이벤트에 대해서 이를 수신하여 자신의 정책을 처리하도록 PolicyHandler 를 구현한다:
 
 ```
-package yes;
+package rentalservice;
 
-import yes.config.kafka.KafkaProcessor;
+import rentalservice.config.kafka.KafkaProcessor;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -405,79 +449,153 @@ public class PolicyHandler{
 
     }
 
-    @Autowired
-    DeliveryRepository deliveryRepository;
-
     @StreamListener(KafkaProcessor.INPUT)
-    public void wheneverPayConfirmed_Ship(@Payload PayConfirmed payConfirmed){
+    public void wheneverPayConfirmed_UpdateStatus(@Payload PayConfirmed payConfirmed){
 
         if(payConfirmed.isMe()){
-            System.out.println("##### listener Ship : " + payConfirmed.toJson());
+            System.out.println("##### listener UpdateStatus : " + payConfirmed.toJson());
+        }
+    }
+    @StreamListener(KafkaProcessor.INPUT)
+    public void wheneverReclamationConfirmed_UpdateStatus(@Payload ReclamationConfirmed reclamationConfirmed){
 
-            Delivery delivery = new Delivery();
-            delivery.setOrderId(payConfirmed.getOrderId().toString());
-            delivery.setStatus("Shipping");
-            delivery.setDeliveryInfo("Delivery Info");
-
-            deliveryRepository.save(delivery);
-
+        if(reclamationConfirmed.isMe()){
+            System.out.println("##### listener UpdateStatus : " + reclamationConfirmed.toJson());
         }
     }
 
+}
+
+
 ```
 
 
-배송 시스템은 주문/결제와 완전히 분리되어있으며, 이벤트 수신에 따라 처리되기 때문에, 배송시스템이 유지보수로 인해 잠시 내려간 상태라도 주문을 받는데 문제가 없다:
-```
-# 배송 서비스 (delivery) 를 잠시 내려놓음 (ctrl+c)
-
-#주문처리
-http localhost:8082/orders productId="Harry Portter3" qty=1   #Success
-
-![image](https://user-images.githubusercontent.com/68535067/97149492-2ce7be00-17b0-11eb-9ade-c845abb1cb04.png)
-
-#주문상태 확인
-http localhost:8082/orders     # 주문상태 안바뀜 확인
-
-![image](https://user-images.githubusercontent.com/68535067/97149492-2ce7be00-17b0-11eb-9ade-c845abb1cb04.png)
-
-#delivery 서비스 기동
-cd delivery
-mvn spring-boot:run
-
-#주문상태 확인
-http localhost:8082/orders     # 모든 주문의 상태가 "배송됨"으로 확인
-
-![image](https://user-images.githubusercontent.com/68535067/97149492-2ce7be00-17b0-11eb-9ade-c845abb1cb04.png)
-
-```
 
 # CQRS 적용
 주문된 현황을 view로 구현함.
 
-![image](https://user-images.githubusercontent.com/70181652/98194435-c35f7080-1f62-11eb-935a-36d1dccd795a.png)
+![image](https://user-images.githubusercontent.com/53685313/98326889-a6e03880-2035-11eb-97f3-4db4e2683619.png)
+
 
 
 # gateway 적용
 소스적용 (istio-gateway)
-<div>
-<img width="400" src="https://user-images.githubusercontent.com/30397679/98193629-0b7d9380-1f61-11eb-8dd7-ed7cae74ad53.PNG"/>
-</div>
+
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: rental-gateway
+  namespace: rental
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - rental/*
 
 소스적용 (istio-virtual-service)
-<div>
-<img width="400" src="https://user-images.githubusercontent.com/30397679/98193728-3536ba80-1f61-11eb-92e9-397cb09b5ea5.PNG"/>
-</div>
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: dap-virtual-service
+  namespace: rental
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - dap-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /auth
+    route:
+    - destination:
+        host: dap-auth-service
+        port:
+          number: 3006
+  - match:
+    - uri:
+        prefix: /api/users
+    - uri:
+        prefix: /api/texts       
+    - uri:
+        prefix: /api/bot 
+    route:
+    - destination:
+        host: dap-user-service
+        port:
+          number: 80
+  - match:
+    - uri:
+        prefix: /api/assets
+    route:
+    - destination:
+        host: dap-asset-service
+        port:
+          number: 80         
+  - match:
+    - uri:
+        prefix: /api/dashboard
+    - uri:
+        prefix: /api/analysis
+    - uri:
+        prefix: /api/myasset
+    route:
+    - destination:
+        host: dap-dashboard-service
+        port:
+          number: 80         
+  - match:
+    - uri:
+        prefix: /api/contents
+    route:
+    - destination:
+        host: dap-contents-service
+        port:
+          number: 80             
+  - match:
+    - uri:
+        prefix: /api/contact
+    route:
+    - destination:
+        host: dap-contact-service
+        port:
+          number: 80             
+  - match:
+    - uri:
+        prefix: /api/admin/user
+    - uri:
+        prefix: /api/admin/statics
+    - uri:
+        prefix: /api/admin/bot
+    route:
+    - destination:
+        host: dap-admin-user-service
+        port:
+          number: 80
+  - match:
+    - uri:
+        prefix: /api/admin/contact
+    route:
+    - destination:
+        host: dap-admin-contact-service
+        port:
+          number: 80
 
-호출확인(orderl)
+호출확인(rental)
 <div>
 <img width="250" src="https://user-images.githubusercontent.com/30397679/98194005-c574ff80-1f61-11eb-897b-a630c5abea71.PNG"/>
 </div>
 호출확인(pay)
 <div>
-<img width="250" src="https://user-images.githubusercontent.com/30397679/98194010-c86ff000-1f61-11eb-9890-18b3b99c9552.PNG"/>
+![image](https://user-images.githubusercontent.com/53685313/98326999-ec9d0100-2035-11eb-90e2-dc64a86667a1.png)
+
 </div>
-호출확인(delivery)
+호출확인(reclamation)
 <div>
 <img width="250" src="https://user-images.githubusercontent.com/30397679/98194020-cb6ae080-1f61-11eb-9d87-bce9e0482aee.PNG"/>
 </div>
@@ -485,10 +603,7 @@ http localhost:8082/orders     # 모든 주문의 상태가 "배송됨"으로 �
 <div>
 <img width="250" src="https://user-images.githubusercontent.com/30397679/98194015-ca39b380-1f61-11eb-8d07-ba6a349aa52d.PNG"/>
 </div>
-호출확인(cancel)
-<div>
-<img width="250" src="https://user-images.githubusercontent.com/30397679/98194032-d0c82b00-1f61-11eb-8ded-a405b135d444.PNG"/>
-</div>
+
 
 각 구현체들은 각자의 source repository 에 구성되었고, 사용한 CI/CD 플랫폼은 Azure를 사용하였으며, pipeline build script 는 각 프로젝트 폴더 이하에 deployment.yml, service.yml 에 포함되었다.
 
@@ -509,7 +624,7 @@ feign:
 hystrix:
   command:
     default:
-      execution.isolation.thread.timeoutInMilliseconds: 60000
+      execution.isolation.thread.timeoutInMilliseconds: 600
 
 ```
 
@@ -519,9 +634,9 @@ hystrix:
 
     @PostPersist
     public void onPostPersist(){
-        Paid paid = new Paid();
+        Payment payment = new Payment();
         BeanUtils.copyProperties(this, paid);
-        paid.publishAfterCommit();
+        payment.publishAfterCommit();
 
         try {
             Thread.sleep((long) (800 + Math.random() * 300));
@@ -546,13 +661,15 @@ hystrix:
 
 - 결제서비스에 대한 replica 를 동적으로 늘려주도록 HPA 를 설정한다. 설정은 CPU 사용량이 15프로를 넘어서면 replica 를 10개까지 늘려준다:
 ```
-kubectl autoscale deploy payment --min=1 --max=10 --cpu-percent=15
+kubectl autoscale deploy rental --min=1 --max=10 --cpu-percent=15
 ```
-![image](https://user-images.githubusercontent.com/68535067/97245477-75e65380-183e-11eb-9557-d247d53be45f.png)
+
+![image](https://user-images.githubusercontent.com/53685313/98327195-574e3c80-2036-11eb-958b-9c018dfc2582.png)
+
 
 - CB 에서 했던 방식대로 워크로드를 2분 동안 걸어준다.
 ```
-siege -c100 -t120S -r10 --content-type "application/json" 'http://request:8080/requests POST {"memberId": "100", "qty":5}'
+siege -c100 -t120S -r10 -v --content-type "application/json" 'http://20.196.129.196:8080/rentals POST {"productId": "taejoong", "qty":5}'
 
 ```
 - 오토스케일이 어떻게 되고 있는지 모니터링을 걸어둔다:
@@ -560,64 +677,181 @@ siege -c100 -t120S -r10 --content-type "application/json" 'http://request:8080/r
 kubectl get deploy pay -w
 ```
 - 어느정도 시간이 흐른 후 (약 30초) 스케일 아웃이 벌어지는 것을 확인할 수 있다:
-![image](https://user-images.githubusercontent.com/68535067/97246490-d1b1dc00-1840-11eb-8ef2-ec4d6610f3e2.png)
-
-- siege 의 로그를 보아도 전체적인 성공률이 높아진 것을 확인 할 수 있다. 
-![image](https://user-images.githubusercontent.com/68535067/97247046-2b66d600-1842-11eb-8648-1715eedf0d58.png)
-
-## 무정지 재배포
-
-* 먼저 무정지 재배포가 100% 되는 것인지 확인하기 위해서 Autoscaler 이나 CB 설정을 제거함
-
-- seige 로 배포작업 직전에 워크로드를 모니터링 함.
-```
-siege -c100 -t120S -r10 --content-type "application/json" 'http://request:8080/requests POST {"memberId": "100", "qty":5}'
-
-```
-
-- 새버전으로의 배포 시작
-```
-kubectl set image ...
-```
-
-- seige 의 화면으로 넘어가서 Availability 가 100% 미만으로 떨어졌는지 확인
-![image](https://user-images.githubusercontent.com/68535067/97380841-36396d80-190b-11eb-8aa9-0d1e4efbcd11.png)
-
-
-배포기간중 Availability 가 평소 100%에서 60% 대로 떨어지는 것을 확인. 원인은 쿠버네티스가 성급하게 새로 올려진 서비스를 READY 상태로 인식하여 서비스 유입을 진행한 것이기 때문. 이를 막기위해 Readiness Probe 를 설정함:
-
-```
-# deployment.yaml 의 readiness probe 의 설정:
-
-
-kubectl apply -f kubernetes/deployment.yaml
-```
-
-- 동일한 시나리오로 재배포 한 후 Availability 확인:
-![image](https://user-images.githubusercontent.com/68535067/97247604-569df500-1843-11eb-9c50-a405a5f6c9c4.png)
-
-배포기간 동안 Availability 가 변화없기 때문에 무정지 재배포가 성공한 것으로 확인됨.
+![image](https://user-images.githubusercontent.com/53685313/98327251-7b118280-2036-11eb-94ce-cee00ad945fe.png)
 
 
 
 ## Configmap
 - configmap.yaml 파일설정
 
-![image](https://user-images.githubusercontent.com/53685313/98197448-18eb4b80-1f6a-11eb-9bec-40e2eec2dcab.png)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apiurl
+data:
+  url: http://pay:8080
+  fluented-sever-ip: 10.xxx.xxx.xxx
 
 - deployment.yaml파일 설정
-![image](https://user-images.githubusercontent.com/53685313/98197450-1dafff80-1f6a-11eb-8e2e-cec8593b6b0c.png)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rental
+  labels:
+    app: rental
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rental
+  template:
+    metadata:
+      labels:
+        app: rental
+    spec:
+      containers:
+        - name: rental
+          image: username/rental:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: configurl
+              valueFrom:
+                configMapKeyRef:
+                  name: apiurl
+                  key: url
+          readinessProbe:
+            httpGet:
+              path: '/actuator/health'
+              port: 8080
+            initialDelaySeconds: 10
+            timeoutSeconds: 2
+            periodSeconds: 5
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: '/actuator/health'
+              port: 8080
+            initialDelaySeconds: 120
+            timeoutSeconds: 2
+            periodSeconds: 5
+            failureThreshold: 5
 
 - application.yaml 파일 설정
-![image](https://user-images.githubusercontent.com/53685313/98197457-23a5e080-1f6a-11eb-9ca0-bdaef1e05abe.png)
+server:
+  port: 8080
+---
+
+spring:
+  profiles: default
+  jpa:
+    properties:
+      hibernate:
+        show_sql: true
+        format_sql: true
+  cloud:
+    stream:
+      kafka:
+        binder:
+          brokers: localhost:9092
+        streams:
+          binder:
+            configuration:
+              default:
+                key:
+                  serde: org.apache.kafka.common.serialization.Serdes$StringSerde
+                value:
+                  serde: org.apache.kafka.common.serialization.Serdes$StringSerde
+      bindings:
+        event-in:
+          group: rental
+          destination: rentalservice
+          contentType: application/json
+        event-out:
+          destination: rentalservice
+          contentType: application/json
+
+logging:
+  level:
+    org.hibernate.type: trace
+    org.springframework.cloud: debug
+server:
+  port: 8081
+
+
+api:
+  pay:
+    url: http://localhost:8082
+  mypage:
+    url: http://localhost:8084
+  reclamation:
+    url: http://localhost:8083
+---
+
+spring:
+  profiles: docker
+  cloud:
+    stream:
+      kafka:
+        binder:
+          brokers: my-kafka.kafka.svc.cluster.local:9092
+        streams:
+          binder:
+            configuration:
+              default:
+                key:
+                  serde: org.apache.kafka.common.serialization.Serdes$StringSerde
+                value:
+                  serde: org.apache.kafka.common.serialization.Serdes$StringSerde
+      bindings:
+        event-in:
+          group: rental
+          destination: rentalservice
+          contentType: application/json
+        event-out:
+          destination: rentalservice
+          contentType: application/json
+
+api:
+  pay:
+    url: ${apiurl}
+  mypage:
+    url: http://mypage:8080
+  reclamation:
+    url: http://reclamation:8080
+
 
 - CancellationService 파일 설정
-![image](https://user-images.githubusercontent.com/53685313/98197471-2d2f4880-1f6a-11eb-9911-78227655ec6a.png)
+
+package rentalservice.external;
+
+import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+
+import java.util.Date;
+
+@FeignClient(name="pay", url="${api.pay.url}")
+public interface PayService {
+
+    @RequestMapping(method= RequestMethod.POST, path="/pays")
+    public void payment(@RequestBody Pay pay);
+
+}
 
 
 
 - 8080포트로 설정하여 테스트
-![image](https://user-images.githubusercontent.com/53685313/98197481-38827400-1f6a-11eb-98ec-cd30c6b9f9e5.png)
+![image](https://user-images.githubusercontent.com/53685313/98327424-c88def80-2036-11eb-8bf4-694dd52fe177.png)
+
+
+## Polyglot 구현
+- Pay의 DB를 hsql로 변경한다.
+![image](https://user-images.githubusercontent.com/53685313/98327508-0559e680-2037-11eb-8256-cdafd8e0821c.png)
+
+- Intellij에서 Dependency에 hsql이 추가됨을 확인한다.
+![image](https://user-images.githubusercontent.com/53685313/98327560-24f10f00-2037-11eb-9c09-18051773d1d2.png)
 
 
 ## Livness구현
